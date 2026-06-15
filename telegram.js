@@ -12,10 +12,7 @@ function escapeHtml(text) {
 function buildCaption(item) {
   const lines = [
     `<b>${escapeHtml(item.title)}</b>`,
-    `Price: ${escapeHtml(item.price)} ${escapeHtml(item.currency)}`,
-    `Size: ${escapeHtml(item.size || 'N/A')}`,
-    `Brand: ${escapeHtml(item.brand || 'N/A')}`,
-    `Condition: ${escapeHtml(item.condition || 'N/A')}`,
+    `Price: ${escapeHtml(String(item.price))} ${escapeHtml(item.currency)}`,
     `${escapeHtml(item.url)}`
   ];
 
@@ -66,7 +63,11 @@ async function sendItem(item) {
     throw new Error('Telegram botToken and chatId must be set in config.js');
   }
 
-  // Si on a des photos, envoyer jusqu'à 3 photos en mediaGroup
+  const inlineKeyboard = {
+    inline_keyboard: [[{ text: '🔗 Voir l\'annonce', url: item.url }]]
+  };
+
+  // Si on a des photos, envoyer jusqu'à 3 photos en mediaGroup, puis ajouter un bouton séparé
   if (item.photos && item.photos.length > 0) {
     const mediaGroup = item.photos.slice(0, 3).map((photoUrl, index) => ({
       type: 'photo',
@@ -75,9 +76,16 @@ async function sendItem(item) {
       parse_mode: index === 0 ? 'HTML' : undefined
     }));
 
-    return post(`/bot${token}/sendMediaGroup`, {
+    await post(`/bot${token}/sendMediaGroup`, {
       chat_id: chatId,
       media: mediaGroup
+    });
+
+    // add a message with an inline link button under the media
+    return post(`/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text: '🔗 Voir l\'annonce',
+      reply_markup: inlineKeyboard
     });
   }
 
@@ -88,7 +96,8 @@ async function sendItem(item) {
       photo: item.photoUrl,
       caption,
       parse_mode: 'HTML',
-      disable_web_page_preview: false
+      disable_web_page_preview: false,
+      reply_markup: inlineKeyboard
     });
   }
 
@@ -97,7 +106,8 @@ async function sendItem(item) {
     chat_id: chatId,
     text: caption,
     parse_mode: 'HTML',
-    disable_web_page_preview: false
+    disable_web_page_preview: false,
+    reply_markup: inlineKeyboard
   });
 }
 

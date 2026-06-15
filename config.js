@@ -4,20 +4,29 @@ const config = {
     chatId: '-5333640255'
   },
   search: {
-    keywords: ['nike running', 'nike dri fit', 'nike division', 'under armour'],
+    keywords: ['Under Armour Pants', 'Nike elite', 'Nike running division', 'nike Trail', 'nike running', 'nike therma fit'],
     sizes: ['M', 'L'],
     brands: ['Nike', 'Adidas'],
     conditions: ['good', 'very_good', 'like_new'],
-    perPage: 100,
+    perPage: 30,
+    // Minimum gap between individual HTTP requests to Vinted (ms)
+    minRequestIntervalMs: 2000,
     locale: 'en_GB',
     currency: 'GBP',
     country: 'GB',
-    minIntervalSeconds: 10,
-    maxIntervalSeconds: 16,
+    // Increased intervals to reduce request frequency
+    minIntervalSeconds: 12,
+    maxIntervalSeconds: 20,
     maxPages: 2
   },
   webhook: {
     url: ''
+  },
+  state: {
+    // File to persist seen IDs between restarts
+    seenIdsFile: 'seenIds.json',
+    // Autosave interval in ms
+    autosaveIntervalMs: 60000
   },
   vinted: {
     host: 'www.vinted.co.uk',

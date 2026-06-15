@@ -5,6 +5,7 @@ const config = require('./config');
 let sessionCookies = 'locale=en_GB;';
 let accessToken = '';
 let lastSessionFetch = 0;
+let lastRequestAt = 0; // timestamp ms of last request to Vinted
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -23,9 +24,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function randomDelay() {
-  const delaySeconds = 2 + Math.random() * 3;
-  return sleep(Math.round(delaySeconds * 1000));
+function humanMicroPause() {
+  // Very short random pause between individual requests (100-800ms)
+  const ms = 100 + Math.random() * 700;
+  return sleep(Math.round(ms));
+}
+
+function humanBetweenPages() {
+  // Slightly longer pause between page requests (300-1500ms)
+  const ms = 300 + Math.random() * 1200;
+  return sleep(Math.round(ms));
 }
 
 function extractAccessToken(cookies) {
@@ -119,9 +127,21 @@ async function ensureSessionCookies() {
   }
 }
 
-async function requestJson(path, retry = true) {
+async function requestJson(path, retry = true, attempt = 0) {
   await ensureSessionCookies();
-  await randomDelay();
+  await humanMicroPause();
+  // Rate limiter: ensure a minimal gap between requests
+  try {
+    const minGap = require('./config').search.minRequestIntervalMs || 1500;
+    const now = Date.now();
+    const elapsed = now - lastRequestAt;
+    if (elapsed < minGap) {
+      const waitMs = Math.round(minGap - elapsed + Math.random() * 300);
+      await sleep(waitMs);
+    }
+  } catch (e) {
+    // ignore config errors
+  }
 
   const options = {
     hostname: config.vinted.host,
@@ -151,6 +171,8 @@ async function requestJson(path, retry = true) {
   };
 
   return new Promise((resolve, reject) => {
+    // update lastRequestAt just before making the request
+    lastRequestAt = Date.now();
     https.get(options, (res) => {
       let stream = res;
       const encoding = res.headers['content-encoding'];
@@ -164,15 +186,25 @@ async function requestJson(path, retry = true) {
       let raw = '';
       stream.on('data', (chunk) => raw += chunk);
       stream.on('end', async () => {
-        if (res.statusCode === 403 && retry) {
-          try {
-            console.warn('Vinted API returned 403, attente 10s puis réessai');
-            await sleep(10000);
-            resolve(await requestJson(path, false));
-          } catch (retryError) {
-            reject(retryError);
+        // Handle common throttling/forbidden responses with exponential backoff
+        if ((res.statusCode === 403 || res.statusCode === 429) && retry) {
+          const maxAttempts = 4;
+          if (attempt < maxAttempts) {
+            const base = 10000; // 10s base
+            // exponential backoff with jitter
+            const backoff = base * Math.pow(2, attempt);
+            const jitter = Math.random() * 0.5 * backoff;
+            const waitMs = Math.round(backoff + jitter);
+            console.warn(`Vinted API ${res.statusCode}, attempt ${attempt + 1}/${maxAttempts}, waiting ${Math.round(waitMs/1000)}s before retry`);
+            try {
+              await sleep(waitMs);
+              resolve(await requestJson(path, true, attempt + 1));
+            } catch (retryError) {
+              reject(retryError);
+            }
+            return;
           }
-          return;
+          return reject(new Error(`Vinted API returned ${res.statusCode} after ${attempt} attempts`));
         }
 
         if (res.statusCode !== 200) {
@@ -338,11 +370,12 @@ async function searchItems() {
       allRawItems = allRawItems.concat(rawItems);
 
       if (page < pagesToFetch) {
-        await randomDelay();
+        await humanBetweenPages();
       }
     }
 
-    await randomDelay();
+    // Micro-pause between keyword searches to appear more human
+    await humanMicroPause();
   }
 
   const normalizedItems = allRawItems

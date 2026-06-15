@@ -3,26 +3,64 @@ const vinted = require('./vinted');
 const telegram = require('./telegram');
 const config = require('./config');
 
+const fs = require('fs');
+const path = require('path');
+
 const seenIds = new Set();
+let autosaveIntervalId = null;
+
+function loadSeenIds() {
+  try {
+    const file = path.resolve(process.cwd(), config.state && config.state.seenIdsFile ? config.state.seenIdsFile : 'seenIds.json');
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf8');
+      const arr = JSON.parse(raw || '[]');
+      arr.forEach(id => seenIds.add(id));
+      console.log(`Loaded ${arr.length} seen IDs from ${file}`);
+    }
+  } catch (err) {
+    console.warn('Failed to load seenIds:', err.message || err);
+  }
+}
+
+function saveSeenIds() {
+  try {
+    const file = path.resolve(process.cwd(), config.state && config.state.seenIdsFile ? config.state.seenIdsFile : 'seenIds.json');
+    const arr = Array.from(seenIds);
+    fs.writeFileSync(file, JSON.stringify(arr, null, 2), 'utf8');
+    // console.log(`Saved ${arr.length} seen IDs to ${file}`);
+  } catch (err) {
+    console.error('Failed to save seenIds:', err.message || err);
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getRandomInterval() {
-  const min = config.search.minIntervalSeconds;
-  const max = config.search.maxIntervalSeconds;
-  return Math.round(min * 1000 + Math.random() * ((max - min) * 1000));
+  // Non-uniform human-like distribution: often ~5s, often ~7s, rarely ~8s
+  const p = Math.random();
+  let seconds;
+  if (p < 0.6) seconds = 5;
+  else if (p < 0.95) seconds = 7;
+  else seconds = 8;
+  // small jitter +/-200ms
+  seconds += (Math.random() - 0.5) * 0.4;
+  return Math.max(1000, Math.round(seconds * 1000));
 }
 
 async function loadInitialItems() {
+  // Load persisted seen IDs first
+  loadSeenIds();
+
   const items = await vinted.searchItems();
   items.forEach((item) => {
     if (item.id) {
       seenIds.add(item.id);
     }
   });
-  console.log(`Initialisation terminée : ${items.length} annonces enregistrées.`);
+  console.log(`Initialisation terminée : ${items.length} annonces récupérées, ${seenIds.size} IDs en mémoire.`);
 }
 
 function postWebhook(item) {
@@ -110,6 +148,14 @@ async function start() {
   await loadInitialItems();
   console.log(`Le bot vérifiera les nouvelles annonces toutes les ${config.search.minIntervalSeconds}-${config.search.maxIntervalSeconds} secondes (intervalle aléatoire).`);
 
+  // Start autosave of seenIds
+  try {
+    const autosaveMs = config.state && config.state.autosaveIntervalMs ? config.state.autosaveIntervalMs : 60000;
+    autosaveIntervalId = setInterval(saveSeenIds, autosaveMs);
+  } catch (e) {
+    // ignore
+  }
+
   while (true) {
     try {
       await checkForNewItems();
@@ -117,11 +163,36 @@ async function start() {
       console.error('Erreur pendant la vérification:', error.message || error);
     }
 
+    // Occasionally take a longer break to mimic human inactivity (1 in 20)
+    if (Math.random() < 0.05) {
+      const longPause = 30000 + Math.floor(Math.random() * 60000); // 30s-90s
+      console.log(`Pause longue aléatoire de ${Math.round(longPause/1000)}s...`);
+      await sleep(longPause);
+    }
+
     const delay = getRandomInterval();
     console.log(`Pause de ${Math.round(delay / 1000)}s avant la prochaine recherche...`);
     await sleep(delay);
   }
 }
+
+function shutdownAndExit(code = 0) {
+  console.log('Sauvegarde de l\'état avant arrêt...');
+  try {
+    if (autosaveIntervalId) clearInterval(autosaveIntervalId);
+    saveSeenIds();
+  } catch (e) {
+    console.error('Erreur lors de la sauvegarde:', e.message || e);
+  }
+  process.exit(code);
+}
+
+process.on('SIGINT', () => shutdownAndExit(0));
+process.on('SIGTERM', () => shutdownAndExit(0));
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  shutdownAndExit(1);
+});
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
