@@ -50,6 +50,15 @@ function getRandomInterval() {
   return Math.max(1000, Math.round(seconds * 1000));
 }
 
+function registerSeenId(id) {
+  if (!id || seenIds.has(id)) {
+    return false;
+  }
+
+  seenIds.add(id);
+  return true;
+}
+
 async function loadInitialItems() {
   // Load persisted seen IDs first
   loadSeenIds();
@@ -117,11 +126,10 @@ async function checkForNewItems() {
   let newCount = 0;
 
   for (const item of items) {
-    if (!item.id || seenIds.has(item.id)) {
+    if (!registerSeenId(item.id)) {
       continue;
     }
 
-    seenIds.add(item.id);
     newCount += 1;
     console.log(`Nouvelle annonce trouvée: ${item.title} (${item.id})`);
 
