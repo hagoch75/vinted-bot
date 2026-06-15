@@ -3,35 +3,18 @@ const vinted = require('./vinted');
 const telegram = require('./telegram');
 const config = require('./config');
 
-const fs = require('fs');
 const path = require('path');
+const seenIds = require('./seenIds');
 
-const seenIds = new Set();
+const seenIdsFile = path.resolve(process.cwd(), config.state && config.state.seenIdsFile ? config.state.seenIdsFile : 'seenIds.json');
 let autosaveIntervalId = null;
 
 function loadSeenIds() {
-  try {
-    const file = path.resolve(process.cwd(), config.state && config.state.seenIdsFile ? config.state.seenIdsFile : 'seenIds.json');
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf8');
-      const arr = JSON.parse(raw || '[]');
-      arr.forEach(id => seenIds.add(id));
-      console.log(`Loaded ${arr.length} seen IDs from ${file}`);
-    }
-  } catch (err) {
-    console.warn('Failed to load seenIds:', err.message || err);
-  }
+  seenIds.load(seenIdsFile);
 }
 
 function saveSeenIds() {
-  try {
-    const file = path.resolve(process.cwd(), config.state && config.state.seenIdsFile ? config.state.seenIdsFile : 'seenIds.json');
-    const arr = Array.from(seenIds);
-    fs.writeFileSync(file, JSON.stringify(arr, null, 2), 'utf8');
-    // console.log(`Saved ${arr.length} seen IDs to ${file}`);
-  } catch (err) {
-    console.error('Failed to save seenIds:', err.message || err);
-  }
+  seenIds.save(seenIdsFile);
 }
 
 function sleep(ms) {
@@ -51,12 +34,7 @@ function getRandomInterval() {
 }
 
 function registerSeenId(id) {
-  if (!id || seenIds.has(id)) {
-    return false;
-  }
-
-  seenIds.add(id);
-  return true;
+  return seenIds.register(id);
 }
 
 async function loadInitialItems() {
@@ -69,7 +47,7 @@ async function loadInitialItems() {
       seenIds.add(item.id);
     }
   });
-  console.log(`Initialisation terminée : ${items.length} annonces récupérées, ${seenIds.size} IDs en mémoire.`);
+  console.log(`Initialisation terminée : ${items.length} annonces récupérées, ${seenIds.size()} IDs en mémoire.`);
 }
 
 function postWebhook(item) {
